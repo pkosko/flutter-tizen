@@ -8,7 +8,7 @@
         "templates/app/tizen.tmpl/tizen-manifest.xml.tmpl",
         "templates/app/tizen.tmpl/shared/res/ic_launcher.png",
         "templates/app/tizen.tmpl/.exportMap",
-        "templates/app/tizen.tmpl/project_def.prop",
+        "templates/app/tizen.tmpl/project_def.prop.tmpl",
         "templates/app/tizen.tmpl/inc/runner.h",
         "templates/app/tizen.tmpl/src/runner.cc",
         "templates/plugin/tizen.tmpl/.gitignore",

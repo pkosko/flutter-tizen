@@ -7,6 +7,10 @@
 #include "tizen_log.h"
 
 int FlutterServiceApp::Run(int argc, char **argv) {
+  TizenLog::Debug("pkosko Run:");
+  for (int i = 0; i < argc; ++i) {
+    TizenLog::Debug("pkosko: argv[%d] = %s", i, argv[i]);
+  }
   service_app_lifecycle_callback_s lifecycle_cb = {};
   lifecycle_cb.create = [](void *data) -> bool {
     FlutterApp *app = (FlutterApp *)data;
@@ -71,12 +75,12 @@ bool FlutterServiceApp::OnCreate() {
     res_path = path;
     free(path);
   }
-  std::string assets_path(res_path + "/flutter_assets");
-  std::string icu_data_path(res_path + "/icudtl.dat");
-  std::string aot_lib_path(res_path + "/../lib/libapp.so");
-
   // Read engine arguments passed from the tool.
   ParseEngineArgs();
+
+  std::string assets_path(res_path + "/flutter_assets_" + app_id_);
+  std::string icu_data_path(res_path + "/icudtl.dat");
+  std::string aot_lib_path(res_path + "/../lib/libapp_" + app_id_ + ".so");
 
   std::vector<const char *> switches;
   for (auto &arg : engine_args) {

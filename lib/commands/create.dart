@@ -154,6 +154,10 @@ class TizenCreateCommand extends CreateCommand {
             throwToolExit('Could not locate app template.');
           }
           copyDirectory(application, dest);
+
+          // TODO(pkosko): create project_def.prop here
+          //
+
         } else {
           copyDirectory(source, dest);
         }

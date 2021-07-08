@@ -127,9 +127,13 @@ class TizenBuilder {
       platform: globals.platform,
     );
 
+    final String appId = tizenProject.appId;
+    print('pkosko applicationId ' + appId);
+
+
     final Target target = buildInfo.isDebug
-        ? DebugTizenApplication(tizenBuildInfo)
-        : ReleaseTizenApplication(tizenBuildInfo);
+        ? DebugTizenApplication(tizenBuildInfo, appId)
+        : ReleaseTizenApplication(tizenBuildInfo, appId);
 
     final Status status = globals.logger.startProgress(
         'Building a Tizen application in $buildModeName mode...');
@@ -149,6 +153,7 @@ class TizenBuilder {
       if (tizenProject.isDotnet) {
         await DotnetTpk(tizenBuildInfo).build(environment);
       } else {
+        globals.logger.printStatus("pkosko building native tpk");
         await NativeTpk(tizenBuildInfo).build(environment);
       }
 

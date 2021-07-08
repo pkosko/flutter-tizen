@@ -25,12 +25,12 @@ bool FlutterApp::OnCreate() {
     res_path = path;
     free(path);
   }
-  std::string assets_path(res_path + "/flutter_assets");
-  std::string icu_data_path(res_path + "/icudtl.dat");
-  std::string aot_lib_path(res_path + "/../lib/libapp.so");
-
   // Read engine arguments passed from the tool.
   ParseEngineArgs();
+
+  std::string assets_path(res_path + "/flutter_assets_" + app_id_);
+  std::string icu_data_path(res_path + "/icudtl.dat");
+  std::string aot_lib_path(res_path + "/../lib/libapp_" + app_id_ + ".so");
 
   std::vector<const char *> switches;
   for (auto &arg : engine_args) {
@@ -93,6 +93,11 @@ void FlutterApp::OnRegionFormatChanged(app_event_info_h event_info) {
 }
 
 int FlutterApp::Run(int argc, char **argv) {
+  TizenLog::Debug("pkosko Run:");
+  for (int i = 0; i < argc; ++i) {
+    TizenLog::Debug("pkosko: argv[%d] = %s", i, argv[i]);
+  }
+
   ui_app_lifecycle_callback_s lifecycle_cb = {};
   lifecycle_cb.create = [](void *data) -> bool {
     FlutterApp *app = (FlutterApp *)data;
@@ -168,14 +173,21 @@ FlutterDesktopPluginRegistrarRef FlutterApp::GetRegistrarForPlugin(
 }
 
 void FlutterApp::ParseEngineArgs() {
-  char *app_id;
+  char *app_id = nullptr;
   if (app_get_id(&app_id) != 0) {
     TizenLog::Warn("App id is not found.");
     return;
   }
   std::string temp_path("/home/owner/share/tmp/sdk_tools/" +
                         std::string(app_id) + ".rpm");
+  TizenLog::Error("pkosko AppId (native): %s", app_id);
+  app_id_ = app_id ? app_id : "";
   free(app_id);
+
+  // cut package name and leave only application name
+  size_t pos = app_id_.rfind(".");
+  app_id_ = pos != std::string::npos ? app_id_.substr(pos + 1) : app_id_;
+  TizenLog::Error("pkosko AppId (only name): %s", app_id_.c_str());
 
   auto file = fopen(temp_path.c_str(), "r");
   if (!file) {

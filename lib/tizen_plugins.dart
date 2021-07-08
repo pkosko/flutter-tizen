@@ -99,6 +99,7 @@ class TizenPlugin extends PluginPlatform implements NativeOrDartPlugin {
         }
         final String key = match.group(1);
         final String value = match.group(2).trim();
+        print('pkosko: key: ' + key + ' value: ' + value);
         _properties[key] = value;
       }
     }

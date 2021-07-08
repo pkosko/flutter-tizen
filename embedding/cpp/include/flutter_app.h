@@ -54,6 +54,7 @@ class FlutterApp : public flutter::PluginRegistry {
 
  protected:
   void ParseEngineArgs();
+  std::string app_id_;
 };
 
 #endif /* FLUTTER_TIZEN_EMBEDDING_CPP_INCLUDE_FLUTTER_APP_H_ */

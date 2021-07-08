@@ -54,6 +54,15 @@ class TizenProject extends FlutterProjectPlatform {
     return '${manifest.packageId}-${manifest.version}.tpk';
   }
 
+  String get appId {
+    print('pkosko build manifestFile: ' + this.manifestFile.path);
+    final TizenManifest manifestFile =
+        TizenManifest.parseFromXml(this.manifestFile);
+    final String appId = manifestFile.applicationId
+        .substring(manifestFile.applicationId.lastIndexOf('.') + 1);
+    return appId;
+  }
+
   Future<void> ensureReadyForPlatformSpecificTooling() async {
     if (!editableDirectory.existsSync() || !isDotnet) {
       return;

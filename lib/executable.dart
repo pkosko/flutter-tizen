@@ -38,6 +38,7 @@ import 'commands/attach.dart';
 import 'commands/build.dart';
 import 'commands/clean.dart';
 import 'commands/create.dart';
+import 'commands/add_service.dart';
 import 'commands/drive.dart';
 import 'commands/packages.dart';
 import 'commands/run.dart';
@@ -105,6 +106,7 @@ Future<void> main(List<String> args) async {
       TizenPackagesCommand(),
       TizenRunCommand(verboseHelp: verboseHelp),
       TizenTestCommand(verboseHelp: verboseHelp),
+      TizenAddServiceCommand(verboseHelp: verboseHelp),
     ],
     verbose: verbose,
     verboseHelp: verboseHelp,
