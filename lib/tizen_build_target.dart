@@ -37,10 +37,19 @@ import 'tizen_tpk.dart';
 ///
 /// Source: [AndroidAssetBundle] in `android.dart`
 abstract class TizenAssetBundle extends Target {
-  const TizenAssetBundle(this._appId);
+  TizenAssetBundle(this._fileSuffix, this._buildInfo, this._isDotnet)
+      : _tpkBuilder = _isDotnet ? DotnetTpk(_buildInfo) : NativeTpk(_buildInfo);
 
-  final String _appId;
-  String get appId => _appId;
+  final String _fileSuffix;
+  String get fileSuffix => _isDotnet ? '' : '_' + _fileSuffix;
+
+  final Tpk _tpkBuilder;
+  Tpk get tpkBuilder => _tpkBuilder;
+
+  final TizenBuildInfo _buildInfo;
+  TizenBuildInfo get buildInfo => _buildInfo;
+
+  final bool _isDotnet;
 
   @override
   String get name => 'tizen_asset_bundle';
@@ -72,7 +81,7 @@ abstract class TizenAssetBundle extends Target {
     final BuildMode buildMode =
         getBuildModeForName(environment.defines[kBuildMode]);
     final Directory outputDirectory = environment.outputDir
-        .childDirectory('flutter_assets_' + appId)
+        .childDirectory('flutter_assets' + fileSuffix)
           ..createSync(recursive: true);
 
     // Only copy the prebuilt runtimes and kernel blob in debug mode.
@@ -104,14 +113,17 @@ abstract class TizenAssetBundle extends Target {
       assetDepfile,
       environment.buildDir.childFile('flutter_assets.d'),
     );
+
+    // TPK build
+    await _tpkBuilder.buildTpk(environment);
   }
 }
 
 /// Source: [DebugAndroidApplication] in `android.dart`
 class DebugTizenApplication extends TizenAssetBundle {
-  DebugTizenApplication(this.buildInfo, String appId) : super(appId);
-
-  final TizenBuildInfo buildInfo;
+  DebugTizenApplication(
+      TizenBuildInfo buildInfo, String fileSuffix, bool isDotnet)
+      : super(fileSuffix, buildInfo, isDotnet);
 
   @override
   String get name => 'debug_tizen_application';
@@ -127,24 +139,26 @@ class DebugTizenApplication extends TizenAssetBundle {
   @override
   List<Source> get outputs => <Source>[
         ...super.outputs,
-        Source.pattern('{OUTPUT_DIR}/flutter_assets_$appId/vm_snapshot_data'),
         Source.pattern(
-            '{OUTPUT_DIR}/flutter_assets_$appId/isolate_snapshot_data'),
-        Source.pattern('{OUTPUT_DIR}/flutter_assets_$appId/kernel_blob.bin'),
+            '{OUTPUT_DIR}/flutter_assets$fileSuffix/vm_snapshot_data'),
+        Source.pattern(
+            '{OUTPUT_DIR}/flutter_assets$fileSuffix/isolate_snapshot_data'),
+        Source.pattern(
+            '{OUTPUT_DIR}/flutter_assets$fileSuffix/kernel_blob.bin'),
       ];
 
   @override
   List<Target> get dependencies => <Target>[
         ...super.dependencies,
-        TizenPlugins(buildInfo, appId),
+        TizenPlugins(buildInfo, fileSuffix),
       ];
 }
 
 /// See: [ReleaseAndroidApplication] in `android.dart`
 class ReleaseTizenApplication extends TizenAssetBundle {
-  ReleaseTizenApplication(this.buildInfo, String appId) : super(appId);
-
-  final TizenBuildInfo buildInfo;
+  ReleaseTizenApplication(
+      TizenBuildInfo buildInfo, String fileSuffix, bool isDotnet)
+      : super(fileSuffix, buildInfo, isDotnet);
 
   @override
   String get name => 'release_tizen_application';
@@ -153,16 +167,16 @@ class ReleaseTizenApplication extends TizenAssetBundle {
   List<Target> get dependencies => <Target>[
         ...super.dependencies,
         TizenAotElf(),
-        TizenPlugins(buildInfo, appId),
+        TizenPlugins(buildInfo, fileSuffix),
       ];
 }
 
 /// Compiles Tizen native plugins into a single shared object.
 class TizenPlugins extends Target {
-  TizenPlugins(this.buildInfo, this.appId);
+  TizenPlugins(this.buildInfo, this.fileSuffix);
 
   final TizenBuildInfo buildInfo;
-  final String appId;
+  final String fileSuffix;
 
   final ProcessUtils _processUtils = ProcessUtils(
       logger: globals.logger, processManager: globals.processManager);
@@ -202,7 +216,7 @@ class TizenPlugins extends Target {
 
     // Create a dummy project in the build directory.
     final Directory rootDir = environment.buildDir
-        .childDirectory('tizen_plugins_' + appId)
+        .childDirectory('tizen_plugins' + fileSuffix)
           ..createSync(recursive: true);
     final String profile =
         TizenManifest.parseFromXml(tizenProject.manifestFile)?.profile;
@@ -210,7 +224,7 @@ class TizenPlugins extends Target {
 
     final File projectDef = rootDir.childFile('project_def.prop');
     projectDef.writeAsStringSync('''
-APPNAME = flutter_plugins_$appId
+APPNAME = flutter_plugins$fileSuffix
 type = sharedLib
 profile = $profile
 
@@ -359,7 +373,8 @@ USER_LIB_DIRS = lib
       throwToolExit('Failed to build Flutter plugins:\n$result');
     }
 
-    final File outputLib = buildDir.childFile('libflutter_plugins_$appId.so');
+    final File outputLib =
+        buildDir.childFile('libflutter_plugins$fileSuffix.so');
     if (!outputLib.existsSync()) {
       throwToolExit(
         'Build succeeded but the file ${outputLib.path} is not found:\n'
@@ -378,15 +393,21 @@ USER_LIB_DIRS = lib
   }
 }
 
-class DotnetTpk {
-  DotnetTpk(this.buildInfo);
-
+abstract class Tpk {
+  Tpk(this.buildInfo);
   final TizenBuildInfo buildInfo;
 
   final ProcessUtils _processUtils = ProcessUtils(
       logger: globals.logger, processManager: globals.processManager);
 
-  Future<void> build(Environment environment) async {
+  Future<void> buildTpk(Environment environment);
+}
+
+class DotnetTpk extends Tpk {
+  DotnetTpk(TizenBuildInfo buildInfo) : super(buildInfo);
+
+  @override
+  Future<void> buildTpk(Environment environment) async {
     final FlutterProject project =
         FlutterProject.fromDirectory(environment.projectDir);
     final TizenProject tizenProject = TizenProject.fromFlutter(project);
@@ -553,6 +574,7 @@ class TizenAotElf extends AotElfBase {
         const Source.artifact(Artifact.genSnapshot, mode: BuildMode.release),
       ];
 
+  // TODO(pkosko): *.so should be also separated here?
   @override
   List<Source> get outputs => const <Source>[
         Source.pattern('{BUILD_DIR}/app.so'),
@@ -564,15 +586,11 @@ class TizenAotElf extends AotElfBase {
       ];
 }
 
-class NativeTpk {
-  NativeTpk(this.buildInfo);
+class NativeTpk extends Tpk {
+  NativeTpk(TizenBuildInfo buildInfo) : super(buildInfo);
 
-  final TizenBuildInfo buildInfo;
-
-  final ProcessUtils _processUtils = ProcessUtils(
-      logger: globals.logger, processManager: globals.processManager);
-
-  Future<void> build(Environment environment) async {
+  @override
+  Future<void> buildTpk(Environment environment) async {
     // TODO(pkosko): how to separed build all subprojects from manifest
     final FlutterProject project =
         FlutterProject.fromDirectory(environment.projectDir);
@@ -581,8 +599,7 @@ class NativeTpk {
     final TizenManifest manifestFile =
         TizenManifest.parseFromXml(tizenProject.manifestFile);
     final String profile = manifestFile?.profile;
-    final String appId = tizenProject.appId;
-    print('pkosko applicationId ' + appId);
+    final String fileSuffix = '_' + tizenProject.appId;
 
     // Clean up the intermediate and output directories.
     final Directory tizenDir = tizenProject.editableDirectory;
@@ -606,9 +623,9 @@ class NativeTpk {
 
     // Copy necessary files.
     final Directory flutterAssetsDir =
-        resDir.childDirectory('flutter_assets_' + appId);
+        resDir.childDirectory('flutter_assets' + fileSuffix);
     copyDirectory(
-      environment.outputDir.childDirectory('flutter_assets_' + appId),
+      environment.outputDir.childDirectory('flutter_assets' + fileSuffix),
       flutterAssetsDir,
     );
 
@@ -629,13 +646,14 @@ class NativeTpk {
 
     if (buildMode.isPrecompiled) {
       final File aotSharedLib = environment.buildDir.childFile('app.so');
-      aotSharedLib.copySync(libDir.childFile('libapp_' + appId + '.so').path);
+      aotSharedLib
+          .copySync(libDir.childFile('libapp' + fileSuffix + '.so').path);
     }
 
     final Directory pluginsDir =
         environment.buildDir.childDirectory('tizen_plugins');
     final File pluginsLib =
-        pluginsDir.childFile('libflutter_plugins_$appId.so');
+        pluginsDir.childFile('libflutter_plugins$fileSuffix.so');
     if (pluginsLib.existsSync()) {
       pluginsLib.copySync(libDir.childFile(pluginsLib.basename).path);
     }
@@ -678,7 +696,7 @@ class NativeTpk {
       '-I"${getUnixPath(clientWrapperDir.childDirectory('include').path)}"',
       '-I"${getUnixPath(publicDir.path)}"',
       ...userIncludes.map(getUnixPath).map((String path) => '-I"$path"'),
-      if (pluginsLib.existsSync()) '-lflutter_plugins_$appId',
+      if (pluginsLib.existsSync()) '-lflutter_plugins$fileSuffix',
       '-D${buildInfo.deviceProfile.toUpperCase()}_PROFILE',
       '-Wl,-unresolved-symbols=ignore-in-shared-libs',
     ];
@@ -768,6 +786,7 @@ class NativeTpk {
     final Directory tpkrootDir = outputDir.childDirectory('tpkroot');
     globals.os.unzip(outputTpk, tpkrootDir);
 
+    // TODO(pkosko) - check this issue with new naming
     // Manually copy files if unzipping failed.
     // Issue: https://github.com/flutter-tizen/flutter-tizen/issues/121
     if (!tpkrootDir.existsSync()) {
@@ -776,7 +795,7 @@ class NativeTpk {
       final File tizenManifest = tizenProject.manifestFile;
       runner.copySync(tpkrootDir
           .childDirectory('bin')
-          .childFile(runner.basename + "_" + appId)
+          .childFile(runner.basename + fileSuffix)
           .path);
       copyDirectory(libDir, tpkrootDir.childDirectory('lib'));
       copyDirectory(resDir, tpkrootDir.childDirectory('res'));
