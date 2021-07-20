@@ -713,25 +713,47 @@ class NativeTpk extends Tpk {
     }
 
     // Run the native build.
-    RunResult result = await _processUtils.run(<String>[
-      tizenSdk.tizenCli.path,
-      'build-native',
-      '-a',
-      getTizenCliArch(buildInfo.targetArch),
-      '-C',
-      buildConfig,
-      '-c',
-      tizenSdk.defaultNativeCompiler,
-      '-r',
-      rootstrap.id,
-      '-e',
-      extraOptions.join(' '),
-      '--',
-      tizenDir.path,
-    ], environment: variables);
-    if (result.exitCode != 0) {
-      throwToolExit('Failed to build native application:\n$result');
-    }
+    print('pkosko rootstrap.id: ${rootstrap.id}');
+    print('pkosko rootstrap.manifestFile: ${rootstrap.manifestFile}');
+    print('pkosko build-native PATH: ${tizenDir.path}');
+    print('pkosko package PATH: ${buildDir.path}');
+    // final List<String> command = <String>[
+    //   tizenSdk.tizenCli.path,
+    //   'build-native',
+    //   '-a',
+    //   getTizenCliArch(buildInfo.targetArch),
+    //   '-C',
+    //   buildConfig,
+    //   '-c',
+    //   tizenSdk.defaultNativeCompiler,
+    //   '-r',
+    //   rootstrap.id,
+    //   '-e',
+    //   extraOptions.join(' '),
+    //   '--',
+    //   tizenDir.path,
+    // ];
+    // print('pkosko FULL BUILD COMMAND: ${command.join(' ')}');
+    // print('pkosko ENVIRONMENT FOR BUILD: ${variables}');
+    // RunResult result = await _processUtils.run(<String>[
+    //   tizenSdk.tizenCli.path,
+    //   'build-native',
+    //   '-a',
+    //   getTizenCliArch(buildInfo.targetArch),
+    //   '-C',
+    //   buildConfig,
+    //   '-c',
+    //   tizenSdk.defaultNativeCompiler,
+    //   '-r',
+    //   rootstrap.id,
+    //   '-e',
+    //   extraOptions.join(' '),
+    //   '--',
+    //   tizenDir.path,
+    // ], environment: variables);
+    // if (result.exitCode != 0) {
+    //   throwToolExit('Failed to build native application:\n$result');
+    // }
 
     // TODO(pkosko): this should be separated part
     // The output TPK is signed with an active profile unless otherwise
@@ -749,18 +771,75 @@ class NativeTpk extends Tpk {
       environment.logger
           .printStatus('The $securityProfile profile is used for signing.');
     }
-    result = await _processUtils.run(<String>[
+    // final List<String> command2 = <String>[
+    //   tizenSdk.tizenCli.path,
+    //   'package',
+    //   '-t',
+    //   'tpk',
+    //   if (securityProfile != null) ...<String>['-s', securityProfile],
+    //   '--',
+    //   buildDir.path,
+    // ];
+    // print('pkosko FULL PACKAGE COMMAND: ${command2.join(' ')}');
+
+    // result = await _processUtils.run(<String>[
+    //   tizenSdk.tizenCli.path,
+    //   'package',
+    //   '-t',
+    //   'tpk',
+    //   if (securityProfile != null) ...<String>['-s', securityProfile],
+    //   '--',
+    //   buildDir.path,
+    // ]);
+    // if (result.exitCode != 0) {
+    //   throwToolExit('Failed to generate TPK:\n$result');
+    // }
+
+    // TODO(pkosko): .project file is needed in main dir of project to make this build command work...
+    // project name is being read from this file by CLI other properties seem to be not important
+    final String method =
+        "name: \"m1\", compiler:\"${tizenSdk.defaultNativeCompiler}\", extraoption: \"${extraOptions.join(' ').replaceAll('"', '\'')}\", configs:[\"$buildConfig\"], rootstraps:[{name:\"${rootstrap.id}\", arch:\"${getTizenCliArch(buildInfo.targetArch)}\"}]";
+    print('pkosko FULL METHOD: $method');
+    final List<String> targets = ['tizen'];
+    final Directory tizenServices =
+        tizenDir.parent.childDirectory('tizen_services');
+    if (tizenServices.existsSync()) {
+      final List<FileSystemEntity> tizenServicesList =
+          tizenServices.listSync(followLinks: false);
+      for (int i = 0; i < tizenServicesList.length; ++i) {
+        print('pkosko FOUND SERVICE: ${tizenServicesList[i].path}');
+        // TODO(pkosko): to make it work we need to first make a 'flutter-level' build for this service
+        targets
+            .add(tizenServicesList[i].path + Platform.pathSeparator + 'tizen');
+      }
+    }
+
+    final String build =
+        'name: "b1", methods: ["m1"], targets: ["${targets.join('","')}"]';
+    const String package = 'name: "test", targets:["b1"]';
+
+    final List<String> buildAppCommand = <String>[
       tizenSdk.tizenCli.path,
-      'package',
-      '-t',
-      'tpk',
+      'build-app',
+      '-m',
+      method,
+      '-b',
+      build,
+      '-p',
+      package,
       if (securityProfile != null) ...<String>['-s', securityProfile],
-      '--',
+      '-o',
       buildDir.path,
-    ]);
+      '--',
+      tizenDir.parent.path,
+    ];
+    print('pkosko FULL BUILD-APP COMMAND: ${buildAppCommand.join(' ')}');
+    final RunResult result =
+        await _processUtils.run(buildAppCommand, environment: variables);
     if (result.exitCode != 0) {
       throwToolExit('Failed to generate TPK:\n$result');
     }
+
     if (securityProfile == null) {
       environment.logger.printStatus(
         'The TPK was signed with a default certificate. You can create one using Certificate Manager.\n'
@@ -769,18 +848,30 @@ class NativeTpk extends Tpk {
       );
     }
 
-    final String tpkArch = buildInfo.targetArch
-        .replaceFirst('arm64', 'aarch64')
-        .replaceFirst('x86', 'i586');
-    final File outputTpk = buildDir.childFile(
-        tizenProject.outputTpkName.replaceFirst('.tpk', '-$tpkArch.tpk'));
+    // TODO(pkosko): find better way to determine file name
+    List<FileSystemEntity> list = buildDir.listSync(followLinks: false);
+    FileSystemEntity outputTpkFile;
+    for (int i = 0; i < list.length; ++i) {
+      if (list[i].basename.endsWith('.tpk')) {
+        outputTpkFile = list[i];
+        print('pkosko GENERATED FILENAME IS: ${outputTpkFile.path}');
+      }
+    }
+
+    // final String tpkArch = buildInfo.targetArch
+    //     .replaceFirst('arm64', 'aarch64')
+    //     .replaceFirst('x86', 'i586');
+    final File outputTpk = buildDir.childFile(outputTpkFile.basename);
+    // tizenProject.outputTpkName.replaceFirst('.tpk', '-$tpkArch.tpk'));
     if (!outputTpk.existsSync()) {
       throwToolExit(
-          'Build succeeded but the expected TPK not found:\n${result.stdout}');
+          'Build succeeded but the expected TPK ($outputTpk) not found:\n${result.toString()}');
     }
 
     // Copy and rename the output TPK.
     outputTpk.copySync(outputDir.childFile(tizenProject.outputTpkName).path);
+    print(
+        'pkosko GENERATED TPK FILE moved to : ${outputDir.childFile(tizenProject.outputTpkName).path}');
 
     // Extract the contents of the TPK to support code size analysis.
     final Directory tpkrootDir = outputDir.childDirectory('tpkroot');
