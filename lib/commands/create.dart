@@ -33,6 +33,12 @@ class TizenCreateCommand extends CreateCommand {
       negatable: false,
       help: 'Create a Tizen service application.',
     );
+    argParser.addFlag(
+      'tizen-multi',
+      defaultsTo: false,
+      negatable: false,
+      help: 'Create a Tizen application with built-in service.',
+    );
   }
 
   @override
@@ -125,7 +131,6 @@ class TizenCreateCommand extends CreateCommand {
     final String appType = stringArg('tizen-language');
     // The Dart plugin template is not currently supported.
     const String pluginType = 'cpp';
-    final bool isTizenService = boolArg('tizen-service');
 
     final List<Directory> created = <Directory>[];
     try {
@@ -144,7 +149,13 @@ class TizenCreateCommand extends CreateCommand {
         created.add(destinationDir);
       }
 
-      copyTemplate(isTizenService ? 'service-app' : 'ui-app', appType, 'app');
+      if (boolArg('tizen-multi')) {
+        copyTemplate('multi-app', appType, 'app');
+      } else if (boolArg('tizen-service')) {
+        copyTemplate('service-app', appType, 'app');
+      } else {
+        copyTemplate('ui-app', appType, 'app');
+      }
       copyTemplate('plugin', pluginType, 'plugin');
 
       return await runInternal();
