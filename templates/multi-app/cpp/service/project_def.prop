@@ -25,6 +25,6 @@ USER_LIBS =
 USER_OBJS =
 
 # User includes
-USER_INC_DIRS = inc flutter src
+USER_INC_DIRS = inc ../flutter src
 USER_INC_FILES =
 USER_CPP_INC_FILES =
