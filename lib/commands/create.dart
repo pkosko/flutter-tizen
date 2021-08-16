@@ -97,6 +97,16 @@ class TizenCreateCommand extends CreateCommand {
         await ensureReadyForTizenTooling(project.example);
       }
     }
+
+    // TODO(pkosko): Find better solution for inject a multi-project main.dart file
+    if (boolArg('tizen-multi')) {
+      final File mainFile =
+          projectDir.childDirectory('tizen').childFile('main.dart');
+      mainFile.copySync(
+          projectDir.childDirectory('lib').childFile('main.dart').path);
+      mainFile.deleteSync();
+    }
+
     return result;
   }
 
