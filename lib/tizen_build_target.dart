@@ -691,224 +691,114 @@ class NativeTpk {
       buildDir.deleteSync(recursive: true);
     }
 
-    // TODO(pkosko): refactor to remove redundancy
-    if (tizenProject.isMultiApp) {
-      String securityProfile = buildInfo.securityProfile;
-      if (securityProfile != null) {
-        if (tizenSdk.securityProfiles == null ||
-            !tizenSdk.securityProfiles.names.contains(securityProfile)) {
-          throwToolExit('The profile $securityProfile does not exist.');
-        }
+    // The output TPK is signed with an active profile unless otherwise
+    // specified.
+    String securityProfile = buildInfo.securityProfile;
+    if (securityProfile != null) {
+      if (tizenSdk.securityProfiles == null ||
+          !tizenSdk.securityProfiles.names.contains(securityProfile)) {
+        throwToolExit('The profile $securityProfile does not exist.');
       }
-      securityProfile ??= tizenSdk.securityProfiles?.active?.name;
-      if (securityProfile != null) {
-        environment.logger
-            .printStatus('The $securityProfile profile is used for signing.');
+    }
+    securityProfile ??= tizenSdk.securityProfiles?.active?.name;
+
+    if (securityProfile != null) {
+      environment.logger
+          .printStatus('The $securityProfile profile is used for signing.');
+    }
+
+    final String method =
+        "name: \"m1\", compiler:\"${tizenSdk.defaultNativeCompiler}\", extraoption: \"${extraOptions.join(' ').replaceAll('"', '\\"')}\", configs:[\"$buildConfig\"], rootstraps:[{name:\"${rootstrap.id}\", arch:\"${getTizenCliArch(buildInfo.targetArch)}\"}]";
+    final List<String> targets =
+        tizenProject.isMultiApp ? ['ui', 'service'] : ['.'];
+
+    final String build =
+        'name: "b1", methods: ["m1"], targets: ["${targets.join('","')}"]';
+    const String package = 'name: "test", targets:["b1"]';
+
+    final List<String> buildAppCommand = <String>[
+      tizenSdk.tizenCli.path,
+      'build-app',
+      '-m',
+      method,
+      '-b',
+      build,
+      '-p',
+      package,
+      if (securityProfile != null) ...<String>['-s', securityProfile],
+      '-o',
+      buildDir.path,
+      '--',
+      tizenDir.path,
+    ];
+    final RunResult result =
+        await _processUtils.run(buildAppCommand, environment: variables);
+    if (result.exitCode != 0) {
+      throwToolExit('Failed to generate TPK:\n$result');
+    }
+
+    if (securityProfile == null) {
+      environment.logger.printStatus(
+        'The TPK was signed with a default certificate. You can create one using Certificate Manager.\n'
+        'https://github.com/flutter-tizen/flutter-tizen/blob/master/doc/install-tizen-sdk.md#create-a-tizen-certificate',
+        color: TerminalColor.yellow,
+      );
+    }
+
+    // TODO(pkosko): find better way to determine file name
+    List<FileSystemEntity> list = buildDir.listSync(followLinks: false);
+    FileSystemEntity outputTpkFile;
+    for (int i = 0; i < list.length; ++i) {
+      if (list[i].basename.endsWith('.tpk')) {
+        outputTpkFile = list[i];
       }
+    }
+    final File outputTpk = buildDir.childFile(outputTpkFile.basename);
+    if (!outputTpk.existsSync()) {
+      throwToolExit(
+          'Build succeeded but the expected TPK ($outputTpk) not found:\n${result.toString()}');
+    }
+    // Copy and rename the output TPK.
+    outputTpk.copySync(outputDir.childFile(tizenProject.outputTpkName).path);
+    environment.logger.printStatus(
+        'Generated tpk file was moved to : ${outputDir.childFile(tizenProject.outputTpkName).path}');
 
-      final String method =
-          "name: \"m1\", compiler:\"${tizenSdk.defaultNativeCompiler}\", extraoption: \"${extraOptions.join(' ').replaceAll('"', '\\"')}\", configs:[\"$buildConfig\"], rootstraps:[{name:\"${rootstrap.id}\", arch:\"${getTizenCliArch(buildInfo.targetArch)}\"}]";
-      print('pkosko FULL METHOD: $method');
-      final List<String> targets = ['ui', 'service'];
-      // final Directory tizenServices =
-      //     tizenDir.parent.childDirectory('tizen_services');
-      // if (tizenServices.existsSync()) {
-      //   final List<FileSystemEntity> tizenServicesList =
-      //       tizenServices.listSync(followLinks: false);
-      //   for (int i = 0; i < tizenServicesList.length; ++i) {
-      //     print('pkosko FOUND SERVICE: ${tizenServicesList[i].path}');
-      //     // TODO(pkosko): to make it work we need to first make a 'flutter-level' build for this service
-      //     targets.add(
-      //         tizenServicesList[i].path + Platform.pathSeparator + 'tizen');
-      //   }
-      // }
+    // Extract the contents of the TPK to support code size analysis.
+    final Directory tpkrootDir = outputDir.childDirectory('tpkroot');
+    globals.os.unzip(outputTpk, tpkrootDir);
 
-      final String build =
-          'name: "b1", methods: ["m1"], targets: ["${targets.join('","')}"]';
-      const String package = 'name: "test", targets:["b1"]';
+    // Manually copy files if unzipping failed.
+    // Issue: https://github.com/flutter-tizen/flutter-tizen/issues/121
+    if (!tpkrootDir.existsSync()) {
+      final Directory outputBinDir = tpkrootDir.childDirectory('bin');
+      if (tizenProject.isMultiApp) {
+        final File runner = tizenDir
+            .childDirectory('ui')
+            .childDirectory(buildConfig)
+            .childFile('runner');
+        runner.copySync(outputBinDir.childFile(runner.basename).path);
 
-      final List<String> buildAppCommand = <String>[
-        tizenSdk.tizenCli.path,
-        'build-app',
-        '-m',
-        method,
-        '-b',
-        build,
-        '-p',
-        package,
-        if (securityProfile != null) ...<String>['-s', securityProfile],
-        '-o',
-        buildDir.path,
-        '--',
-        tizenDir.path,
-      ];
-      print('pkosko FULL BUILD-APP COMMAND: ${buildAppCommand.join(' ')}');
-      final RunResult result =
-          await _processUtils.run(buildAppCommand, environment: variables);
-      if (result.exitCode != 0) {
-        throwToolExit('Failed to generate TPK:\n$result');
-      }
+        final File runnerService = tizenDir
+            .childDirectory('service')
+            .childDirectory(buildConfig)
+            .childFile('runner_service');
+        runnerService
+            .copySync(outputBinDir.childFile(runnerService.basename).path);
 
-      if (securityProfile == null) {
-        environment.logger.printStatus(
-          'The TPK was signed with a default certificate. You can create one using Certificate Manager.\n'
-          'https://github.com/flutter-tizen/flutter-tizen/blob/master/doc/install-tizen-sdk.md#create-a-tizen-certificate',
-          color: TerminalColor.yellow,
-        );
-      }
-
-      // TODO(pkosko): find better way to determine file name
-      List<FileSystemEntity> list = buildDir.listSync(followLinks: false);
-      FileSystemEntity outputTpkFile;
-      for (int i = 0; i < list.length; ++i) {
-        if (list[i].basename.endsWith('.tpk')) {
-          outputTpkFile = list[i];
-          print('pkosko GENERATED FILENAME IS: ${outputTpkFile.path}');
-        }
-      }
-
-      // final String tpkArch = buildInfo.targetArch
-      //     .replaceFirst('arm64', 'aarch64')
-      //     .replaceFirst('x86', 'i586');
-      final File outputTpk = buildDir.childFile(outputTpkFile.basename);
-      // tizenProject.outputTpkName.replaceFirst('.tpk', '-$tpkArch.tpk'));
-      if (!outputTpk.existsSync()) {
-        throwToolExit(
-            'Build succeeded but the expected TPK ($outputTpk) not found:\n${result.toString()}');
-      }
-
-      // Copy and rename the output TPK.
-      outputTpk.copySync(outputDir.childFile(tizenProject.outputTpkName).path);
-      print(
-          'pkosko GENERATED TPK FILE moved to : ${outputDir.childFile(tizenProject.outputTpkName).path}');
-
-      // Extract the contents of the TPK to support code size analysis.
-      final Directory tpkrootDir = outputDir.childDirectory('tpkroot');
-      globals.os.unzip(outputTpk, tpkrootDir);
-
-      // TODO(pkosko) - check this issue with new naming
-      // Manually copy files if unzipping failed.
-      // Issue: https://github.com/flutter-tizen/flutter-tizen/issues/121
-
-      // if (!tpkrootDir.existsSync()) {
-      //   final File runner = buildDir.childFile('runner');
-      //   final Directory sharedDir = tizenDir.childDirectory('shared');
-      //   final File tizenManifest = tizenProject.manifestFile;
-      //   runner.copySync(tpkrootDir
-      //       .childDirectory('bin')
-      //       .childFile(runner.basename + fileSuffix)
-      //       .path);
-      //   copyDirectory(libDir, tpkrootDir.childDirectory('lib'));
-      //   copyDirectory(resDir, tpkrootDir.childDirectory('res'));
-      //   copyDirectory(sharedDir, tpkrootDir.childDirectory('shared'));
-      //   tizenManifest
-      //       .copySync(tpkrootDir.childFile(tizenManifest.basename).path);
-      // }
-    } else {
-      // Run the native build.
-      print('pkosko FULL BUILD-APP COMMAND: ${<String>[
-        tizenSdk.tizenCli.path,
-        'build-native',
-        '-a',
-        getTizenCliArch(buildInfo.targetArch),
-        '-C',
-        buildConfig,
-        '-c',
-        tizenSdk.defaultNativeCompiler,
-        '-r',
-        rootstrap.id,
-        '-e',
-        extraOptions.join(' '),
-        '--',
-        tizenDir.path,
-      ].join(' ')}');
-
-      RunResult result = await _processUtils.run(<String>[
-        tizenSdk.tizenCli.path,
-        'build-native',
-        '-a',
-        getTizenCliArch(buildInfo.targetArch),
-        '-C',
-        buildConfig,
-        '-c',
-        tizenSdk.defaultNativeCompiler,
-        '-r',
-        rootstrap.id,
-        '-e',
-        extraOptions.join(' '),
-        '--',
-        tizenDir.path,
-      ], environment: variables);
-      if (result.exitCode != 0) {
-        throwToolExit('Failed to build native application:\n$result');
-      }
-
-      // The output TPK is signed with an active profile unless otherwise
-      // specified.
-      String securityProfile = buildInfo.securityProfile;
-      if (securityProfile != null) {
-        if (tizenSdk.securityProfiles == null ||
-            !tizenSdk.securityProfiles.names.contains(securityProfile)) {
-          throwToolExit('The profile $securityProfile does not exist.');
-        }
-      }
-      securityProfile ??= tizenSdk.securityProfiles?.active?.name;
-
-      if (securityProfile != null) {
-        environment.logger
-            .printStatus('The $securityProfile profile is used for signing.');
-      }
-      result = await _processUtils.run(<String>[
-        tizenSdk.tizenCli.path,
-        'package',
-        '-t',
-        'tpk',
-        if (securityProfile != null) ...<String>['-s', securityProfile],
-        '--',
-        buildDir.path,
-      ]);
-      if (result.exitCode != 0) {
-        throwToolExit('Failed to generate TPK:\n$result');
-      }
-      if (securityProfile == null) {
-        environment.logger.printStatus(
-          'The TPK was signed with a default certificate. You can create one using Certificate Manager.\n'
-          'https://github.com/flutter-tizen/flutter-tizen/blob/master/doc/install-tizen-sdk.md#create-a-tizen-certificate',
-          color: TerminalColor.yellow,
-        );
-      }
-
-      final String tpkArch = buildInfo.targetArch
-          .replaceFirst('arm64', 'aarch64')
-          .replaceFirst('x86', 'i586');
-      final File outputTpk = buildDir.childFile(
-          tizenProject.outputTpkName.replaceFirst('.tpk', '-$tpkArch.tpk'));
-      if (!outputTpk.existsSync()) {
-        throwToolExit(
-            'Build succeeded but the expected TPK not found:\n${result.stdout}');
-      }
-
-      // Copy and rename the output TPK.
-      outputTpk.copySync(outputDir.childFile(tizenProject.outputTpkName).path);
-
-      // Extract the contents of the TPK to support code size analysis.
-      final Directory tpkrootDir = outputDir.childDirectory('tpkroot');
-      globals.os.unzip(outputTpk, tpkrootDir);
-
-      // Manually copy files if unzipping failed.
-      // Issue: https://github.com/flutter-tizen/flutter-tizen/issues/121
-      if (!tpkrootDir.existsSync()) {
+        // TODO(pkosko): tizen-manifest.xml is generated on-fly during build process
+        // thus the file from UI application will be not 100% accurate. Need to check
+        // if getting a 'real' tizen-manifest.xml is available
+      } else {
         final File runner = buildDir.childFile('runner');
-        final Directory sharedDir = tizenDir.childDirectory('shared');
-        final File tizenManifest = tizenProject.manifestFile;
-        runner.copySync(
-            tpkrootDir.childDirectory('bin').childFile(runner.basename).path);
-        copyDirectory(libDir, tpkrootDir.childDirectory('lib'));
-        copyDirectory(resDir, tpkrootDir.childDirectory('res'));
-        copyDirectory(sharedDir, tpkrootDir.childDirectory('shared'));
-        tizenManifest
-            .copySync(tpkrootDir.childFile(tizenManifest.basename).path);
+        runner.copySync(outputBinDir.childFile(runner.basename).path);
       }
+
+      final Directory sharedDir = tizenDir.childDirectory('shared');
+      final File tizenManifest = tizenProject.manifestFile;
+      copyDirectory(libDir, tpkrootDir.childDirectory('lib'));
+      copyDirectory(resDir, tpkrootDir.childDirectory('res'));
+      copyDirectory(sharedDir, tpkrootDir.childDirectory('shared'));
+      tizenManifest.copySync(tpkrootDir.childFile(tizenManifest.basename).path);
     }
   }
 }
